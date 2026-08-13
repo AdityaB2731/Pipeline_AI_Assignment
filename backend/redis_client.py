@@ -1,8 +1,9 @@
 import os
-import redis.asyncio as redis
-from kombu.utils.url import safequote
+from urllib.parse import quote
 
-redis_host = safequote(os.environ.get('REDIS_HOST', 'localhost'))
+import redis.asyncio as redis
+
+redis_host = quote(os.environ.get('REDIS_HOST', 'localhost'), safe='')
 redis_client = redis.Redis(host=redis_host, port=6379, db=0)
 
 async def add_key_value_redis(key, value, expire=None):
