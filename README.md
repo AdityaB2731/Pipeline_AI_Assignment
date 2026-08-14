@@ -86,6 +86,104 @@ Each integration follows the same four-step pattern used by Airtable and Notion:
 
 ---
 
+## Full Project Run Guide
+
+Follow these steps from the project root to run the complete application end-to-end.
+
+### 1) Install Redis
+
+Make sure Redis is installed and running locally before starting the backend.
+
+```bash
+redis-server
+```
+
+Then confirm it is responding:
+
+```bash
+redis-cli ping
+# Expected: PONG
+```
+
+### 2) Set up backend environment
+
+```bash
+cd backend
+python -m venv .venv
+```
+
+Activate the virtual environment:
+
+```bash
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# macOS/Linux
+source .venv/bin/activate
+```
+
+Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Create the local secrets file:
+
+```bash
+cp .env.example .env
+```
+
+On Windows (PowerShell):
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Then open `.env` and add your HubSpot OAuth values as described in the section below.
+
+### 3) Start the backend
+
+From the `backend` folder:
+
+```bash
+uvicorn main:app --reload
+```
+
+The API will run at:
+
+```text
+http://localhost:8000
+```
+
+### 4) Start the frontend
+
+Open a second terminal and run:
+
+```bash
+cd frontend
+npm install
+npm run start
+```
+
+The frontend will run at:
+
+```text
+http://localhost:3000
+```
+
+### 5) Open the app
+
+Visit:
+
+```text
+http://localhost:3000
+```
+
+From there, select **HubSpot**, click **Connect to HubSpot**, complete the OAuth flow, and then click **Load Data**.
+
+---
+
 ## Environment Setup
 
 Secrets and configuration live in `backend/.env`. This file is **gitignored** and must never be committed or included in submission ZIPs.
