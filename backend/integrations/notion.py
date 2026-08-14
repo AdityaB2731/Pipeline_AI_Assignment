@@ -1,7 +1,9 @@
 # notion.py
 
 import json
+import os
 import secrets
+from dotenv import load_dotenv
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse
 import httpx
@@ -12,6 +14,8 @@ from integrations.integration_item import IntegrationItem
 
 from redis_client import add_key_value_redis, get_value_redis, delete_key_redis
 
+load_dotenv()
+
 CLIENT_ID = os.getenv("NOTION_CLIENT_ID")
 CLIENT_SECRET = os.getenv("NOTION_CLIENT_SECRET")
 encoded_client_id_secret = base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode()
@@ -20,6 +24,8 @@ REDIRECT_URI = 'http://localhost:8000/integrations/notion/oauth2callback'
 authorization_url = f'https://api.notion.com/v1/oauth/authorize?client_id={CLIENT_ID}&response_type=code&owner=user&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fintegrations%2Fnotion%2Foauth2callback'
 
 async def authorize_notion(user_id, org_id):
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise HTTPException(status_code=400, detail='Notion CLIENT_ID or CLIENT_SECRET missing in backend/.env')
     state_data = {
         'state': secrets.token_urlsafe(32),
         'user_id': user_id,
@@ -63,6 +69,9 @@ async def oauth2callback_notion(request: Request):
             delete_key_redis(f'notion_state:{org_id}:{user_id}'),
         )
 
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail=response.text)
+
     await add_key_value_redis(f'notion_credentials:{org_id}:{user_id}', json.dumps(response.json()), expire=600)
     
     close_window_script = """
@@ -104,32 +113,36 @@ def _recursive_dict_search(data, target_key):
     return None
 
 def create_integration_item_metadata_object(
-    response_json: str,
+    response_json: dict,
 ) -> IntegrationItem:
     """creates an integration metadata object from the response"""
-    name = _recursive_dict_search(response_json['properties'], 'content')
-    parent_type = (
-        ''
-        if response_json['parent']['type'] is None
-        else response_json['parent']['type']
-    )
-    if response_json['parent']['type'] == 'workspace':
+    properties = response_json.get('properties', {})
+    name = _recursive_dict_search(properties, 'content') if properties else None
+
+    parent = response_json.get('parent', {})
+    parent_type = parent.get('type') or ''
+    if parent_type == 'workspace':
         parent_id = None
+    elif parent_type:
+        parent_id = parent.get(parent_type)
     else:
-        parent_id = (
-            response_json['parent'][parent_type]
-        )
+        parent_id = None
+
+    if name is None and response_json.get('object') == 'database':
+        title = response_json.get('title', [])
+        if title and isinstance(title[0], dict):
+            name = title[0].get('plain_text', 'Untitled database')
 
     name = _recursive_dict_search(response_json, 'content') if name is None else name
-    name = 'multi_select' if name is None else name
-    name = response_json['object'] + ' ' + name
+    name = response_json.get('object', 'item') if name is None else name
+    name = f"{response_json.get('object', 'item')} {name}"
 
     integration_item_metadata = IntegrationItem(
-        id=response_json['id'],
-        type=response_json['object'],
+        id=response_json.get('id'),
+        type=response_json.get('object'),
         name=name,
-        creation_time=response_json['created_time'],
-        last_modified_time=response_json['last_edited_time'],
+        creation_time=response_json.get('created_time'),
+        last_modified_time=response_json.get('last_edited_time'),
         parent_id=parent_id,
     )
 
@@ -154,5 +167,7 @@ async def get_items_notion(credentials) -> list[IntegrationItem]:
                 create_integration_item_metadata_object(result)
             )
 
-        print(list_of_integration_item_metadata)
-    return
+        print(f'list_of_integration_item_metadata: {list_of_integration_item_metadata}')
+        return list_of_integration_item_metadata
+
+    raise HTTPException(status_code=400, detail=response.text)

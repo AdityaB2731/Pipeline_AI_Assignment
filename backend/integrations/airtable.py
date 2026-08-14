@@ -11,12 +11,11 @@ import base64
 import hashlib
 
 import requests
+from dotenv import load_dotenv
 from integrations.integration_item import IntegrationItem
 
 from redis_client import add_key_value_redis, get_value_redis, delete_key_redis
-
-# CLIENT_ID = 'XXX'
-# CLIENT_SECRET = 'XXX'
+load_dotenv()
 CLIENT_ID = os.getenv("AIRTABLE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("AIRTABLE_CLIENT_SECRET")
 REDIRECT_URI = 'http://localhost:8000/integrations/airtable/oauth2callback'
@@ -26,6 +25,8 @@ encoded_client_id_secret = base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encod
 scope = 'data.records:read data.records:write data.recordComments:read data.recordComments:write schema.bases:read schema.bases:write'
 
 async def authorize_airtable(user_id, org_id):
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise HTTPException(status_code=400, detail='Airtable CLIENT_ID or CLIENT_SECRET missing in backend/.env')
     state_data = {
         'state': secrets.token_urlsafe(32),
         'user_id': user_id,
@@ -65,6 +66,9 @@ async def oauth2callback_airtable(request: Request):
     if not saved_state or original_state != json.loads(saved_state).get('state'):
         raise HTTPException(status_code=400, detail='State does not match.')
 
+    if isinstance(code_verifier, bytes):
+        code_verifier = code_verifier.decode('utf-8')
+
     async with httpx.AsyncClient() as client:
         response, _, _ = await asyncio.gather(
             client.post(
@@ -74,7 +78,7 @@ async def oauth2callback_airtable(request: Request):
                     'code': code,
                     'redirect_uri': REDIRECT_URI,
                     'client_id': CLIENT_ID,
-                    'code_verifier': code_verifier.decode('utf-8'),
+                    'code_verifier': code_verifier,
                 },
                 headers={
                     'Authorization': f'Basic {encoded_client_id_secret}',
@@ -84,6 +88,9 @@ async def oauth2callback_airtable(request: Request):
             delete_key_redis(f'airtable_state:{org_id}:{user_id}'),
             delete_key_redis(f'airtable_verifier:{org_id}:{user_id}'),
         )
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail=response.text)
 
     await add_key_value_redis(f'airtable_credentials:{org_id}:{user_id}', json.dumps(response.json()), expire=600)
     
